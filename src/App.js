@@ -1,52 +1,5 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import StarRating from "./StarRating";
-
-const tempMovieData = [
-  {
-    imdbID: "tt1375666",
-    Title: "Inception",
-    Year: "2010",
-    Poster:
-      "https://m.media-amazon.com/images/M/MV5BMjAxMzY3NjcxNF5BMl5BanBnXkFtZTcwNTI5OTM0Mw@@._V1_SX300.jpg",
-  },
-  {
-    imdbID: "tt0133093",
-    Title: "The Matrix",
-    Year: "1999",
-    Poster:
-      "https://m.media-amazon.com/images/M/MV5BNzQzOTk3OTAtNDQ0Zi00ZTVkLWI0MTEtMDllZjNkYzNjNTc4L2ltYWdlXkEyXkFqcGdeQXVyNjU0OTQ0OTY@._V1_SX300.jpg",
-  },
-  {
-    imdbID: "tt6751668",
-    Title: "Parasite",
-    Year: "2019",
-    Poster:
-      "https://m.media-amazon.com/images/M/MV5BYWZjMjk3ZTItODQ2ZC00NTY5LWE0ZDYtZTI3MjcwN2Q5NTVkXkEyXkFqcGdeQXVyODk4OTc3MTY@._V1_SX300.jpg",
-  },
-];
-
-const tempWatchedData = [
-  {
-    imdbID: "tt1375666",
-    Title: "Inception",
-    Year: "2010",
-    Poster:
-      "https://m.media-amazon.com/images/M/MV5BMjAxMzY3NjcxNF5BMl5BanBnXkFtZTcwNTI5OTM0Mw@@._V1_SX300.jpg",
-    runtime: 148,
-    imdbRating: 8.8,
-    userRating: 10,
-  },
-  {
-    imdbID: "tt0088763",
-    Title: "Back to the Future",
-    Year: "1985",
-    Poster:
-      "https://m.media-amazon.com/images/M/MV5BZmU0M2Y1OGUtZjIxNi00ZjBkLTg1MjgtOWIyNThiZWIwYjRiXkEyXkFqcGdeQXVyMTQxNzMzNDI@._V1_SX300.jpg",
-    runtime: 116,
-    imdbRating: 8.5,
-    userRating: 9,
-  },
-];
 
 const KEY = "b999cc43";
 
@@ -54,12 +7,19 @@ const average = (arr) =>
   arr.reduce((acc, cur, i, arr) => acc + cur / arr.length, 0);
 
 export default function App() {
-  const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState("");
   const [movies, setMovies] = useState([]);
-  const [watched, setWatched] = useState([]);
+  const [watched, setWatched] = useState(() => {
+    const storedValue = localStorage.getItem("watched");
+    if (storedValue) {
+      return JSON.parse(storedValue);
+    } else {
+      return [];
+    }
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
+  const [selectedId, setSelectedId] = useState(null);
 
   const handleSelectMovie = (id) => {
     setSelectedId((selectedId) => (id === selectedId ? null : id));
@@ -84,12 +44,18 @@ export default function App() {
   };
 
   useEffect(() => {
+    localStorage.setItem("watched", JSON.stringify(watched));
+  }, [watched]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     const fetchMovies = async () => {
       try {
         setIsLoading(true);
         setError("");
         const res = await fetch(
-          `http://www.omdbapi.com/?i=tt3896198&apikey=${KEY}&s=${query}`
+          `http://www.omdbapi.com/?i=tt3896198&apikey=${KEY}&s=${query}`,
+          { signal: controller.signal }
         );
 
         if (!res.ok) throw new Error("Something went wrong during fetch");
@@ -98,8 +64,9 @@ export default function App() {
         if (data.Response === "False") throw new Error(data.Error);
 
         setMovies(data.Search);
+        setError("");
       } catch (err) {
-        setError(err.message);
+        if (err.name !== "The user aborted a request.") setError(err.message);
       } finally {
         setIsLoading(false);
       }
@@ -111,6 +78,10 @@ export default function App() {
       return;
     }
     fetchMovies();
+
+    return () => {
+      controller.abort();
+    };
   }, [query]);
 
   // fetch(`http://www.omdbapi.com/?i=tt3896198&apikey=${KEY}&s=interstellar`)
@@ -165,6 +136,22 @@ const NavBar = ({ children }) => {
 };
 
 const Search = ({ query, setQuery }) => {
+  const inputEl = useRef(null);
+
+  useEffect(() => {
+    const callback = (e) => {
+      if (document.activeElement === inputEl.current) return;
+
+      if (e.code === "Enter") {
+        inputEl.current.focus();
+        setQuery("");
+      }
+    };
+
+    document.addEventListener("keydown", callback);
+    return () => document.addEventListener("keydown", callback);
+  }, [setQuery]);
+
   return (
     <input
       className="search"
@@ -172,6 +159,7 @@ const Search = ({ query, setQuery }) => {
       placeholder="Search movies..."
       value={query}
       onChange={(e) => setQuery(e.target.value)}
+      ref={inputEl}
     />
   );
 };
@@ -307,6 +295,12 @@ const MovieDetails = ({ selectedId, onCloseMovie, onAddWatched, watched }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [userRating, setUserRating] = useState("");
 
+  const countRef = useRef(0);
+
+  useEffect(() => {
+    if (userRating) countRef.current++;
+  }, [userRating]);
+
   const isWatched = watched.map((movie) => movie.imdbID).includes(selectedId);
 
   const {
@@ -331,6 +325,7 @@ const MovieDetails = ({ selectedId, onCloseMovie, onAddWatched, watched }) => {
       imdbRating: Number(imdbRating),
       runtime: Number(runtime.split(" ").at(0)),
       userRating,
+      countRatingDecisions: countRef.current,
     };
     onAddWatched(newWatchedMovie);
     onCloseMovie();
@@ -353,6 +348,29 @@ const MovieDetails = ({ selectedId, onCloseMovie, onAddWatched, watched }) => {
     };
     getMovieDetails();
   }, [selectedId]);
+
+  useEffect(() => {
+    if (title) document.title = `Movie | ${title}`;
+
+    return () => {
+      document.title = "usePopcorn";
+    };
+  }, [title]);
+
+  useEffect(() => {
+    const callBack = (e) => {
+      if (e.code === "Escape") {
+        onCloseMovie();
+        console.log("CLOSING");
+      }
+    };
+    document.addEventListener("keydown", callBack);
+
+    return () => {
+      document.removeEventListener("keydown", callBack);
+    };
+  }, [onCloseMovie]);
+
   return (
     <div className="details">
       {isLoading ? (
